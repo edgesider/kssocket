@@ -1,4 +1,4 @@
-package com.ykai
+package com.ykai.kssocket
 
 import java.nio.ByteBuffer
 import java.nio.channels.Pipe
@@ -6,6 +6,7 @@ import java.nio.channels.SelectableChannel
 import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
 import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.thread
 import kotlin.concurrent.withLock
 import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
@@ -28,6 +29,7 @@ class IOEventEmitterImpl : IOEventEmitter {
 
     /**
      * 维护每个channel对应的续体集合
+     *
      * 一旦某个channel有了新的等待操作：
      * --如果对应的事件还没有被监听，则开始监听；
      * ----如果该channel还没有注册到[selector]，则先注册
@@ -46,54 +48,46 @@ class IOEventEmitterImpl : IOEventEmitter {
         while (true) {
             if (selector.select() == 0)
                 continue
-            modifyPipe.processModify { msg ->
-                when (msg.type) {
-                    SelectorModifyPipe.SelectorModifyType.AddOp -> {
-                        if (msg.channel.isRegistered) {
-                            msg.channel.keyFor(selector).addOp(msg.op)
-                        } else {
-                            msg.channel.register(selector, msg.op.toInt())
-                        }
-                    }
-                    SelectorModifyPipe.SelectorModifyType.RemoveOp -> {
-                        msg.channel.keyFor(selector).let { key ->
-                            key.removeOp(msg.op)
-                            key.cancelIfUseless()
-                        }
-                    }
-                }
-            }
+            processModify()
             selector.selectedKeys().forEach { key ->
-                selector.selectedKeys().remove(key)
-                if (key.isConnectable) {
-                    consumeContinuation(key, InterestOp.Connect)
+                // TODO lock free
+                // 加锁的原因见下
+                synchronized(channelToContinuations) {
+                    selector.selectedKeys().remove(key)
+                    if (key.isConnectable) {
+                        consumeContinuation(key, InterestOp.Connect)
+                    }
+                    if (key.isReadable) {
+                        consumeContinuation(key, InterestOp.Read)
+                    }
+                    if (key.isWritable) {
+                        consumeContinuation(key, InterestOp.Write)
+                    }
+                    if (key.isAcceptable) {
+                        consumeContinuation(key, InterestOp.Accept)
+                    }
+                    // 如果运行到这里时，另一个线程发起commit操作，下面的remove操作就会错误移除仍需要的channel
+                    if (key.interestOps() == 0) {
+                        channelToContinuations.remove(key.channel())
+                    }
                 }
-                if (key.isReadable) {
-                    consumeContinuation(key, InterestOp.Read)
-                }
-                if (key.isWritable) {
-                    consumeContinuation(key, InterestOp.Write)
-                }
-                if (key.isAcceptable) {
-                    consumeContinuation(key, InterestOp.Accept)
-                }
-                key.cancelIfUseless()
             }
         }
     }
 
     override fun runInThread() {
-        Thread(this, "EventEmitter").let {
-            it.isDaemon = false
-            it.start()
+        thread(start = true, isDaemon = true) {
+            this.run()
         }
     }
 
     override fun commitContinuation(continuation: Continuation<Unit>, chan: SelectableChannel, op: InterestOp) {
-        (channelToContinuations[chan] ?: TypedContinuationList()
-            .also { channelToContinuations[chan] = it })
-                .getByOp(op)
-                .add(continuation)
+        synchronized(channelToContinuations) {
+            (channelToContinuations[chan] ?: TypedContinuationList()
+                .also { channelToContinuations[chan] = it })
+        }
+            .getByOp(op)
+            .add(continuation)
         modifyPipe.addOp(chan, op)
     }
 
@@ -102,11 +96,31 @@ class IOEventEmitterImpl : IOEventEmitter {
      */
     private fun consumeContinuation(key: SelectionKey, op: InterestOp) {
         channelToContinuations[key.channel()]!!
-                .getByOp(op)
-                .let { queue ->
-                    queue.removeAt(0).resume(Unit)
-                    queue.ifEmpty { key.removeOp(op) }
+            .getByOp(op)
+            .let { queue ->
+                queue.removeAt(0).resume(Unit)
+                queue.ifEmpty { key.removeOp(op) }
+            }
+    }
+
+    /**
+     * 处理其他线程对[selector]的修改请求。
+     */
+    private fun processModify() {
+        modifyPipe.processModify { msg ->
+            when (msg.type) {
+                SelectorModifyPipe.SelectorModifyType.AddOp -> {
+                    if (msg.channel.isRegistered) {
+                        msg.channel.keyFor(selector).addOp(msg.op)
+                    } else {
+                        msg.channel.register(selector, msg.op.toInt())
+                    }
                 }
+                SelectorModifyPipe.SelectorModifyType.RemoveOp -> {
+                    msg.channel.keyFor(selector).removeOp(msg.op)
+                }
+            }
+        }
     }
 
     private fun SelectionKey.addOp(op: InterestOp) {
@@ -117,22 +131,42 @@ class IOEventEmitterImpl : IOEventEmitter {
         this.interestOps(this.interestOps() and (-1 xor op.toInt()))
     }
 
-    private fun SelectionKey.cancelIfUseless() {
-        if (this.interestOps() == 0) {
-            this.cancel()
-            channelToContinuations.remove(this.channel())
-        }
-    }
-
     /**
-     * [Selector.wakeup]不能保证唤醒所对应的操作一定会被处理。
-     * 将所有的注册修改操作发送至[wakeupPipe]和[modifyQueue]，就可以保证每次操作都能被很快处理。
+     * [Selector.select]和[SelectableChannel.register]、[SelectionKey.interestOps]都会占用同一把锁，这就
+     * 导致要在另一个线程中修改[Selector]时，必须先调用[Selector.wakeup]，还要加上一系列的同步机制。
+     *
+     * selector.wakeup()
+     * chan.register(...)
+     *
+     * 同时，[Selector.wakeup]不能保证唤醒所对应的操作一定会被立即处理。考虑下面的代码：
+     *
+     * while (true) {
+     *     selector.select()
+     *     if (wakeupForModify()) {
+     *         // wakeup被调用，有新的修改产生
+     *         // ...等待修改操作完成
+     *         continue
+     *     }
+     *         // ...处理selector.selectedKeys()
+     * }
+     *
+     * 因为在[Selector]醒来时[Selector.wakeup]调用会被忽略，因此，如果在continue结束、selector.select()仍未执行之时，
+     * 其他线程的[Selector.wakeup]是无法被及时处理的。
+     *
+     *
+     * 这个类可以解决这个问题，思路如下：
+     * 当有一个新的修改操作发生时，会向[wakeupPipe]写入一个字节，并向[modifyQueue]添加要修改的操作，[wakeupPipe]会被注册到
+     * [selector]上。当[selector]醒来时，调用[processModify]来处理修改操作。
+     *
+     * 因为并不会忽略任何wakeup请求，所以保证了修改被及时处理。同时，由于在同一个线程中执行修改操作，也不需要复杂的同步机制，只需要保证
+     * [wakeupPipe]和[modifyQueue]同时被操作即可。
      * */
     private class SelectorModifyPipe(val selector: Selector) {
         enum class SelectorModifyType { AddOp, RemoveOp }
-        class SelectorModifyMessage(val type: SelectorModifyType,
-                                    val channel: SelectableChannel,
-                                    val op: InterestOp
+        class SelectorModifyMessage(
+            val type: SelectorModifyType,
+            val channel: SelectableChannel,
+            val op: InterestOp
         )
 
         /**
@@ -216,6 +250,5 @@ class IOEventEmitterImpl : IOEventEmitter {
             }
         }
     }
-
 }
 

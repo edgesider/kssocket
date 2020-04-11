@@ -1,15 +1,14 @@
-package com.ykai
+package com.ykai.kssocket
 
-import com.ykai.InterestOp
 import java.nio.channels.SelectableChannel
 import kotlin.coroutines.Continuation
 
 /**
- * 用于将事件与续体进行关联：当某个感兴趣的事件发生时，唤醒续体。
+ * 用于监听事件并将事件与续体进行关联：当某个感兴趣的事件发生时，唤醒续体。
  */
 interface IOEventEmitter : Runnable {
     /**
-     * 在一个线程中运行该[IOEventEmitter]
+     * 在一个新线程中运行该[IOEventEmitter]
      */
     fun runInThread()
 

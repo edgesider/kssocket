@@ -1,12 +1,14 @@
-package com.ykai
+package com.ykai.kssocket
 
-import com.ykai.InterestOp
 import java.nio.channels.SelectableChannel
 
 /**
- * 等待一个IO事件的发生
+ * 在协程中等待某个IO事件的发生。
  */
 interface IOEventWaiter {
+    /**
+     * 在[chan]上挂起等待[event]事件。
+     */
     suspend fun waitEvent(chan: SelectableChannel, event: InterestOp)
 }
 

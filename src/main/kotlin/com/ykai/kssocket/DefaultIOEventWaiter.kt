@@ -1,10 +1,11 @@
-package com.ykai
+package com.ykai.kssocket
 
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.nio.channels.SelectableChannel
 
 object DefaultIOEventWaiter : IOEventWaiter {
-    private val dispatcher: IOEventEmitter = IOEventEmitterImpl()
+    private val dispatcher: IOEventEmitter =
+        IOEventEmitterImpl()
 
     init {
         dispatcher.runInThread()
@@ -16,4 +17,3 @@ object DefaultIOEventWaiter : IOEventWaiter {
         }
     }
 }
-
