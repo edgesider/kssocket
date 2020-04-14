@@ -1,19 +1,29 @@
 package com.ykai.kssocket
 
 import java.nio.channels.SelectableChannel
-import kotlin.coroutines.Continuation
 
 /**
- * 用于监听事件并将事件与续体进行关联：当某个感兴趣的事件发生时，唤醒续体。
+ * 监听IO事件。
+ * 在使用之前需要[IOEventEmitter.register]，停止使用时要调用[IOEventEmitter.unregister]，
  */
 interface IOEventEmitter : Runnable {
     /**
-     * 在一个新线程中运行该[IOEventEmitter]
+     * 注册通道。
      */
-    fun runInThread()
+    suspend fun register(chan: SelectableChannel)
 
     /**
-     * 提交一个续体[continuation]，并与[chan]上的[op]事件关联
+     * 取消注册通道。
+     * 会使得正阻塞到[waitEvent]的方法抛出[UnregisterException]
      */
-    fun commitContinuation(continuation: Continuation<Unit>, chan: SelectableChannel, op: InterestOp)
+    suspend fun unregister(chan: SelectableChannel)
+
+    /**
+     * 等待[chan]上[event]事件的发生。
+     * 如果[chan]在等待过程中被[unregister]，则这个方法会抛出[UnregisterException]。
+     *
+     * @throws UnregisterException
+     */
+    suspend fun waitEvent(chan: SelectableChannel, event: InterestOp)
+    fun close()
 }

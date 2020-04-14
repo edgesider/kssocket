@@ -4,6 +4,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.SocketAddress
 import java.nio.ByteBuffer
+import java.nio.channels.ClosedChannelException
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 
@@ -12,11 +13,15 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     companion object {
         suspend fun open(addr: SocketAddress? = null) =
             ASocketChannel(SocketChannel.open()).also {
+                DefaultIOEventEmitter.register(it.socketChannel)
                 if (addr != null)
                     it.connect(addr)
             }
 
-        fun wrap(socketChannel: SocketChannel) = ASocketChannel(socketChannel)
+        suspend fun wrap(socketChannel: SocketChannel) =
+            ASocketChannel(socketChannel).also {
+                DefaultIOEventEmitter.register(socketChannel)
+            }
     }
 
     init {
@@ -26,12 +31,11 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     private val readLock = Mutex()
     private val writeLock = Mutex()
 
+    val isOpen get() = socketChannel.isOpen
+
     suspend fun connect(addr: SocketAddress) {
         socketChannel.connect(addr)
-        DefaultIOEventWaiter.waitEvent(
-            socketChannel,
-            InterestOp.Connect
-        )
+        wait(InterestOp.Connect)
         socketChannel.finishConnect()
     }
 
@@ -44,10 +48,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
             return true
         readLock.withLock {
             while (true) {
-                DefaultIOEventWaiter.waitEvent(
-                    socketChannel,
-                    InterestOp.Read
-                )
+                wait(InterestOp.Read)
                 if (socketChannel.read(buffer) == -1) {
                     // EOF
                     break
@@ -69,10 +70,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
             return
         writeLock.withLock {
             while (true) {
-                DefaultIOEventWaiter.waitEvent(
-                    socketChannel,
-                    InterestOp.Write
-                )
+                wait(InterestOp.Write)
                 socketChannel.write(buffer)
                 if (buffer.remaining() == 0) {
                     // 写入完毕，只有这一个break可以正常退出循环
@@ -83,15 +81,30 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
         }
     }
 
-    fun close() = socketChannel.close()
+    private suspend fun wait(event: InterestOp) {
+        try {
+            DefaultIOEventEmitter.waitEvent(socketChannel, event)
+        } catch (ex: UnregisterException) {
+            throw ClosedChannelException()
+        }
+    }
+
+    suspend fun close() = socketChannel.also {
+        DefaultIOEventEmitter.unregister(it)
+        it.close()
+    }
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
 class AServerSocketChannel private constructor(private val socketChannel: ServerSocketChannel) {
     companion object {
-        fun open() = AServerSocketChannel(ServerSocketChannel.open()).also {
-            it.socketChannel.configureBlocking(false)
+        suspend fun open() = AServerSocketChannel(ServerSocketChannel.open()).also {
+            DefaultIOEventEmitter.register(it.socketChannel)
         }
+    }
+
+    init {
+        socketChannel.configureBlocking(false)
     }
 
     fun bind(addr: SocketAddress) {
@@ -99,7 +112,7 @@ class AServerSocketChannel private constructor(private val socketChannel: Server
     }
 
     suspend fun accept(): ASocketChannel {
-        DefaultIOEventWaiter.waitEvent(
+        DefaultIOEventEmitter.waitEvent(
             socketChannel,
             InterestOp.Accept
         )
