@@ -32,6 +32,12 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     private val writeLock = Mutex()
 
     val isOpen get() = socketChannel.isOpen
+    val isConnected get() = socketChannel.isConnected
+    val remoteAddress: SocketAddress = socketChannel.remoteAddress
+    val localAddress: SocketAddress = socketChannel.localAddress
+
+    fun shutdownInput(): SocketChannel = socketChannel.shutdownInput()
+    fun shutdownOutput(): SocketChannel = socketChannel.shutdownOutput()
 
     suspend fun connect(addr: SocketAddress) {
         socketChannel.connect(addr)

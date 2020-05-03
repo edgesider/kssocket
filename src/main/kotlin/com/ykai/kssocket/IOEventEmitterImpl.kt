@@ -37,19 +37,20 @@ class IOEventEmitterImpl : IOEventEmitter {
             for (key in selector.selectedKeys()) {
                 if (!key.isValid) {
                     // 可能被另一个线程关闭
+                    key.cancel()
                     continue
                 }
                 if (key.isAcceptable) {
-                    consume(key.channel(), InterestOp.Accept)
+                    consume(key, InterestOp.Accept)
                 }
                 if (key.isReadable) {
-                    consume(key.channel(), InterestOp.Read)
+                    consume(key, InterestOp.Read)
                 }
                 if (key.isWritable) {
-                    consume(key.channel(), InterestOp.Write)
+                    consume(key, InterestOp.Write)
                 }
                 if (key.isConnectable) {
-                    consume(key.channel(), InterestOp.Connect)
+                    consume(key, InterestOp.Connect)
                 }
                 selector.selectedKeys().remove(key)
             }
@@ -96,10 +97,8 @@ class IOEventEmitterImpl : IOEventEmitter {
         TODO()
     }
 
-    private fun consume(chan: SelectableChannel, event: InterestOp) {
-        chan.keyFor(selector)?.let { key ->
-            (key.attachment() as TypedContinuationQueues).consume(event)
-        } ?: throw Exception("not register")
+    private fun consume(key: SelectionKey, event: InterestOp) {
+        (key.attachment() as TypedContinuationQueues).consume(event)
     }
 
     private class ModifyPipe(val selector: Selector) {
