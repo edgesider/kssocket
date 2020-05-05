@@ -5,6 +5,7 @@ import kotlinx.coroutines.sync.withLock
 import java.net.SocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.ClosedChannelException
+import java.nio.channels.DatagramChannel
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 
@@ -50,7 +51,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
      * @return 表明是否读满[buffer]。返回false意味着到了EOF，并且[buffer]未被读满。
      */
     suspend fun read(buffer: ByteBuffer): Boolean {
-        if (buffer.remaining() < 0)
+        if (buffer.remaining() <= 0)
             return true
         readLock.withLock {
             while (true) {
@@ -72,7 +73,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
      * 尝试写入buffer.remaining()个字符
      */
     suspend fun write(buffer: ByteBuffer) {
-        if (buffer.remaining() < 0)
+        if (buffer.remaining() <= 0)
             return
         writeLock.withLock {
             while (true) {
@@ -123,5 +124,47 @@ class AServerSocketChannel private constructor(private val socketChannel: Server
             InterestOp.Accept
         )
         return ASocketChannel.wrap(socketChannel.accept())
+    }
+}
+
+@Suppress("BlockingMethodInNonBlockingContext")
+class ADatagramChannel private constructor(private val datagramChannel: DatagramChannel) {
+    companion object {
+        suspend fun open() = ADatagramChannel(DatagramChannel.open()).also {
+            DefaultIOEventEmitter.register(it.datagramChannel)
+        }
+
+        suspend fun wrap(datagramChannel: DatagramChannel) =
+            ADatagramChannel(datagramChannel).also {
+                DefaultIOEventEmitter.register(it.datagramChannel)
+            }
+    }
+
+    init {
+        datagramChannel.configureBlocking(false)
+    }
+
+    private val readLock = Mutex()
+    private val writeLock = Mutex()
+
+    val isConnected = datagramChannel.isConnected
+    val remoteAddress = datagramChannel.remoteAddress
+
+    suspend fun receive(buffer: ByteBuffer): SocketAddress? {
+        if (buffer.remaining() <= 0)
+            return null
+        readLock.withLock {
+            DefaultIOEventEmitter.waitEvent(datagramChannel, InterestOp.Read)
+            return datagramChannel.receive(buffer)
+        }
+    }
+
+    suspend fun send(buffer: ByteBuffer, target: SocketAddress) {
+        if (buffer.remaining() <= 0)
+            return
+        writeLock.withLock {
+            DefaultIOEventEmitter.waitEvent(datagramChannel, InterestOp.Write)
+            datagramChannel.send(buffer, target)
+        }
     }
 }

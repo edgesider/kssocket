@@ -13,7 +13,7 @@ fun main() = runBlocking {
         println("written: echo")
         buffer.clear()
         sock.read(buffer)
-        buffer.position(0)
+        buffer.flip()
         println("read: ${Charsets.UTF_8.decode(buffer)}")
     }
 }
