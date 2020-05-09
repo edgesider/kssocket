@@ -34,8 +34,8 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
 
     val isOpen get() = socketChannel.isOpen
     val isConnected get() = socketChannel.isConnected
-    val remoteAddress: SocketAddress = socketChannel.remoteAddress
-    val localAddress: SocketAddress = socketChannel.localAddress
+    val remoteAddress: SocketAddress get() = socketChannel.remoteAddress
+    val localAddress: SocketAddress get() = socketChannel.localAddress
 
     fun shutdownInput(): SocketChannel = socketChannel.shutdownInput()
     fun shutdownOutput(): SocketChannel = socketChannel.shutdownOutput()
