@@ -1,6 +1,7 @@
 package com.ykai.kssocket.examples
 
 import com.ykai.kssocket.AServerSocketChannel
+import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
@@ -12,7 +13,7 @@ fun main(): Unit = runBlocking {
     while (true) {
         sock.accept().let { client ->
             println("new client: $client")
-            launch {
+            GlobalScope.launch {
                 val buffer = ByteBuffer.allocate(4)
                 try {
                     while (true) {
