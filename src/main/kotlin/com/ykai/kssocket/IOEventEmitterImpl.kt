@@ -125,10 +125,9 @@ class IOEventEmitterImpl : IOEventEmitter {
         }
 
         fun send(message: ModifyMessage) {
-            synchronized(pipe) {
-                pipe.sink().write(ByteBuffer.wrap("@".toByteArray()))
-                msgQueue.add(message)
-            }
+            // 确保将消息先加入队列，再进行管道写入，就不需要加锁
+            msgQueue.add(message)
+            pipe.sink().write(ByteBuffer.wrap("@".toByteArray()))
         }
 
         fun recvAll(action: (message: ModifyMessage) -> Unit) {
