@@ -1,5 +1,6 @@
 package com.ykai.kssocket
 
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.SocketAddress
@@ -23,6 +24,14 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
             ASocketChannel(socketChannel).also {
                 DefaultIOEventEmitter.register(socketChannel)
             }
+
+        suspend fun openBlocking(addr: SocketAddress? = null) = runBlocking {
+            open(addr)
+        }
+
+        suspend fun wrapBlocking(socketChannel: SocketChannel) = runBlocking {
+            wrap(socketChannel)
+        }
     }
 
     init {
@@ -47,10 +56,10 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     }
 
     /**
-     * 尝试读取buffer.remaining()个字符到[buffer]
+     * 尝试读取buffer.remaining()个字节到[buffer]
      * @return 表明是否读满[buffer]。返回false意味着到了EOF，并且[buffer]未被读满。
      */
-    suspend fun read(buffer: ByteBuffer): Boolean {
+    suspend fun readAll(buffer: ByteBuffer): Boolean {
         if (buffer.remaining() <= 0)
             return true
         readLock.withLock {
@@ -70,9 +79,9 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     }
 
     /**
-     * 尝试写入buffer.remaining()个字符
+     * 尝试写入buffer.remaining()个字节
      */
-    suspend fun write(buffer: ByteBuffer) {
+    suspend fun writeAll(buffer: ByteBuffer) {
         if (buffer.remaining() <= 0)
             return
         writeLock.withLock {
@@ -88,6 +97,28 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
         }
     }
 
+    /**
+     * 执行一次读取操作以尝试读取若干字节，长度不确定。
+     * @return 已读字节数，可能为0。如果到达EOF，则返回-1。
+     */
+    suspend fun read(buffer: ByteBuffer): Int {
+        readLock.withLock {
+            wait(InterestOp.Read)
+            return socketChannel.read(buffer)
+        }
+    }
+
+    /**
+     * 执行一次写入操作以尝试写入若干字节，长度不确定。
+     * @return 写入的字节数，可能为0。
+     */
+    suspend fun write(buffer: ByteBuffer): Int {
+        writeLock.withLock {
+            wait(InterestOp.Write)
+            return socketChannel.write(buffer)
+        }
+    }
+
     private suspend fun wait(event: InterestOp) {
         try {
             DefaultIOEventEmitter.waitEvent(socketChannel, event)
@@ -99,6 +130,10 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     suspend fun close() = socketChannel.also {
         DefaultIOEventEmitter.unregister(it)
         it.close()
+    }
+
+    fun closeBlocking() = runBlocking {
+        close()
     }
 }
 

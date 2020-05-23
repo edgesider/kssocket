@@ -18,14 +18,14 @@ fun main(): Unit = runBlocking {
                 try {
                     while (true) {
                         buffer.clear()
-                        if (!client.read(buffer)) {
+                        if (!client.readAll(buffer)) {
                             println("[$client]: EOF")
                             break
                         }
                         buffer.position(0)
                         println("[$client] read: ${Charsets.UTF_8.decode(buffer)}")
                         buffer.position(0)
-                        client.write(buffer)
+                        client.writeAll(buffer)
                         println("[$client] write")
                     }
                 } finally {

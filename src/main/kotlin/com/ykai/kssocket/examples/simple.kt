@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 fun main(): Unit = runBlocking {
     ASocketChannel.open().let { sock ->
         sock.connect(InetSocketAddress("localhost", 8000))
-        sock.write(ByteBuffer.wrap("kssocket".toByteArray()))
+        sock.writeAll(ByteBuffer.wrap("kssocket".toByteArray()))
         sock.close()
     }
     Unit
