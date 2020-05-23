@@ -25,11 +25,11 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
                 DefaultIOEventEmitter.register(socketChannel)
             }
 
-        suspend fun openBlocking(addr: SocketAddress? = null) = runBlocking {
+        fun openBlocking(addr: SocketAddress? = null) = runBlocking {
             open(addr)
         }
 
-        suspend fun wrapBlocking(socketChannel: SocketChannel) = runBlocking {
+        fun wrapBlocking(socketChannel: SocketChannel) = runBlocking {
             wrap(socketChannel)
         }
     }
