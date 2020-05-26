@@ -8,6 +8,7 @@ import java.nio.channels.Pipe
 import java.nio.channels.SelectableChannel
 import java.nio.channels.SelectionKey
 import java.nio.channels.Selector
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.coroutines.resume
 
 class IOEventEmitterImpl : IOEventEmitter {
@@ -34,10 +35,11 @@ class IOEventEmitterImpl : IOEventEmitter {
                     msg.cont.cancel(ex)
                 }
             }
-            for (key in selector.selectedKeys()) {
+            val iter = selector.selectedKeys().iterator()
+            while (iter.hasNext()) {
+                val key = iter.next()
                 if (!key.isValid) {
                     // 可能被另一个线程关闭
-                    key.cancel()
                     continue
                 }
                 if (key.isAcceptable) {
@@ -52,7 +54,7 @@ class IOEventEmitterImpl : IOEventEmitter {
                 if (key.isConnectable) {
                     consume(key, InterestOp.Connect)
                 }
-                selector.selectedKeys().remove(key)
+                iter.remove()
             }
         }
     }
@@ -106,6 +108,7 @@ class IOEventEmitterImpl : IOEventEmitter {
         class ModifyMessage(val type: ModifyType, val chan: SelectableChannel, val cont: CancellableContinuation<Unit>)
 
         private val pipe = Pipe.open()
+        private val msgQueue2 = ConcurrentLinkedQueue<ModifyMessage>()
         private val msgQueue = mutableListOf<ModifyMessage>()
         internal val pipeSourceKey: SelectionKey
 
@@ -125,19 +128,22 @@ class IOEventEmitterImpl : IOEventEmitter {
         }
 
         fun send(message: ModifyMessage) {
-            // 确保将消息先加入队列，再进行管道写入，就不需要加锁
-            msgQueue.add(message)
-            pipe.sink().write(ByteBuffer.wrap("@".toByteArray()))
+            synchronized(msgQueue) {
+                msgQueue.add(message)
+                pipe.sink().write(ByteBuffer.wrap("@".toByteArray()))
+            }
         }
 
         fun recvAll(action: (message: ModifyMessage) -> Unit) {
-            val buf = ByteBuffer.allocate(100)
-            while (true) {
-                val n = pipe.source().read(buf)
-                if (n == 0)
-                    break
-                for (i in 1..n) {
-                    action(msgQueue.removeAt(0))
+            synchronized(msgQueue) {
+                val buf = ByteBuffer.allocate(100)
+                while (true) {
+                    val n = pipe.source().read(buf)
+                    if (n == 0)
+                        break
+                    for (i in 1..n) {
+                        action(msgQueue.removeAt(0))
+                    }
                 }
             }
         }

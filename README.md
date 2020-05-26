@@ -14,3 +14,7 @@ fun main() = runBlocking {
     }
 }
 ```
+
+## TDOO
+
+- [ ] Socks/Socks5支持

@@ -5,17 +5,28 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.SocketAddress
 import java.nio.ByteBuffer
-import java.nio.channels.ClosedChannelException
-import java.nio.channels.DatagramChannel
-import java.nio.channels.ServerSocketChannel
-import java.nio.channels.SocketChannel
+import java.nio.channels.*
+
+abstract class AsyncChannel {
+    abstract val nioChannel: SelectableChannel
+
+    @Suppress("BlockingMethodInNonBlockingContext")
+    open suspend fun close() = nioChannel.let {
+        DefaultIOEventEmitter.unregister(it)
+        it.close()
+    }
+
+    fun closeBlocking() = runBlocking {
+        close()
+    }
+}
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class ASocketChannel private constructor(private val socketChannel: SocketChannel) {
+class ASocketChannel private constructor(override val nioChannel: SocketChannel) : AsyncChannel() {
     companion object {
         suspend fun open(addr: SocketAddress? = null) =
             ASocketChannel(SocketChannel.open()).also {
-                DefaultIOEventEmitter.register(it.socketChannel)
+                DefaultIOEventEmitter.register(it.nioChannel)
                 if (addr != null)
                     it.connect(addr)
             }
@@ -35,24 +46,24 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     }
 
     init {
-        socketChannel.configureBlocking(false)
+        nioChannel.configureBlocking(false)
     }
 
     private val readLock = Mutex()
     private val writeLock = Mutex()
 
-    val isOpen get() = socketChannel.isOpen
-    val isConnected get() = socketChannel.isConnected
-    val remoteAddress: SocketAddress get() = socketChannel.remoteAddress
-    val localAddress: SocketAddress get() = socketChannel.localAddress
+    val isOpen get() = nioChannel.isOpen
+    val isConnected get() = nioChannel.isConnected
+    val remoteAddress: SocketAddress get() = nioChannel.remoteAddress
+    val localAddress: SocketAddress get() = nioChannel.localAddress
 
-    fun shutdownInput(): SocketChannel = socketChannel.shutdownInput()
-    fun shutdownOutput(): SocketChannel = socketChannel.shutdownOutput()
+    fun shutdownInput(): SocketChannel = nioChannel.shutdownInput()
+    fun shutdownOutput(): SocketChannel = nioChannel.shutdownOutput()
 
     suspend fun connect(addr: SocketAddress) {
-        socketChannel.connect(addr)
+        nioChannel.connect(addr)
         wait(InterestOp.Connect)
-        socketChannel.finishConnect()
+        nioChannel.finishConnect()
     }
 
     /**
@@ -65,7 +76,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
         readLock.withLock {
             while (true) {
                 wait(InterestOp.Read)
-                if (socketChannel.read(buffer) == -1) {
+                if (nioChannel.read(buffer) == -1) {
                     // EOF
                     break
                 }
@@ -87,7 +98,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
         writeLock.withLock {
             while (true) {
                 wait(InterestOp.Write)
-                socketChannel.write(buffer)
+                nioChannel.write(buffer)
                 if (buffer.remaining() == 0) {
                     // 写入完毕，只有这一个break可以正常退出循环
                     break
@@ -104,7 +115,7 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     suspend fun read(buffer: ByteBuffer): Int {
         readLock.withLock {
             wait(InterestOp.Read)
-            return socketChannel.read(buffer)
+            return nioChannel.read(buffer)
         }
     }
 
@@ -115,82 +126,76 @@ class ASocketChannel private constructor(private val socketChannel: SocketChanne
     suspend fun write(buffer: ByteBuffer): Int {
         writeLock.withLock {
             wait(InterestOp.Write)
-            return socketChannel.write(buffer)
+            return nioChannel.write(buffer)
         }
     }
 
     private suspend fun wait(event: InterestOp) {
         try {
-            DefaultIOEventEmitter.waitEvent(socketChannel, event)
+            DefaultIOEventEmitter.waitEvent(nioChannel, event)
         } catch (ex: UnregisterException) {
             throw ClosedChannelException()
         }
     }
-
-    suspend fun close() = socketChannel.also {
-        DefaultIOEventEmitter.unregister(it)
-        it.close()
-    }
-
-    fun closeBlocking() = runBlocking {
-        close()
-    }
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class AServerSocketChannel private constructor(private val socketChannel: ServerSocketChannel) {
+class AServerSocketChannel private constructor(override val nioChannel: ServerSocketChannel) : AsyncChannel() {
     companion object {
         suspend fun open() = AServerSocketChannel(ServerSocketChannel.open()).also {
-            DefaultIOEventEmitter.register(it.socketChannel)
+            DefaultIOEventEmitter.register(it.nioChannel)
         }
     }
 
     init {
-        socketChannel.configureBlocking(false)
+        nioChannel.configureBlocking(false)
     }
 
+    val localAddress = nioChannel.localAddress
+
     fun bind(addr: SocketAddress) {
-        socketChannel.bind(addr)
+        nioChannel.bind(addr)
     }
 
     suspend fun accept(): ASocketChannel {
         DefaultIOEventEmitter.waitEvent(
-            socketChannel,
+            nioChannel,
             InterestOp.Accept
         )
-        return ASocketChannel.wrap(socketChannel.accept())
+        return ASocketChannel.wrap(nioChannel.accept())
     }
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class ADatagramChannel private constructor(private val datagramChannel: DatagramChannel) {
+class ADatagramChannel private constructor(override val nioChannel: DatagramChannel) : AsyncChannel() {
     companion object {
         suspend fun open() = ADatagramChannel(DatagramChannel.open()).also {
-            DefaultIOEventEmitter.register(it.datagramChannel)
+            DefaultIOEventEmitter.register(it.nioChannel)
         }
 
         suspend fun wrap(datagramChannel: DatagramChannel) =
             ADatagramChannel(datagramChannel).also {
-                DefaultIOEventEmitter.register(it.datagramChannel)
+                DefaultIOEventEmitter.register(it.nioChannel)
             }
     }
 
     init {
-        datagramChannel.configureBlocking(false)
+        nioChannel.configureBlocking(false)
     }
 
     private val readLock = Mutex()
     private val writeLock = Mutex()
 
-    val isConnected = datagramChannel.isConnected
-    val remoteAddress = datagramChannel.remoteAddress
+    val isConnected = nioChannel.isConnected
+    val localAddress = nioChannel.localAddress
+    val remoteAddress = nioChannel.remoteAddress
 
     suspend fun receive(buffer: ByteBuffer): SocketAddress? {
         if (buffer.remaining() <= 0)
             return null
         readLock.withLock {
-            DefaultIOEventEmitter.waitEvent(datagramChannel, InterestOp.Read)
-            return datagramChannel.receive(buffer)
+            DefaultIOEventEmitter.waitEvent(nioChannel, InterestOp.Read)
+            return nioChannel.receive(buffer)
         }
     }
 
@@ -198,8 +203,8 @@ class ADatagramChannel private constructor(private val datagramChannel: Datagram
         if (buffer.remaining() <= 0)
             return
         writeLock.withLock {
-            DefaultIOEventEmitter.waitEvent(datagramChannel, InterestOp.Write)
-            datagramChannel.send(buffer, target)
+            DefaultIOEventEmitter.waitEvent(nioChannel, InterestOp.Write)
+            nioChannel.send(buffer, target)
         }
     }
 }
