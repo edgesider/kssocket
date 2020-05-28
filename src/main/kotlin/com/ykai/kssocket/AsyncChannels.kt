@@ -9,10 +9,11 @@ import java.nio.channels.*
 
 abstract class AsyncChannel {
     abstract val nioChannel: SelectableChannel
+    abstract val emitter: IOEventEmitter
 
     @Suppress("BlockingMethodInNonBlockingContext")
     open suspend fun close() = nioChannel.let {
-        DefaultIOEventEmitter.unregister(it)
+        emitter.unregister(it)
         it.close()
     }
 
@@ -22,26 +23,39 @@ abstract class AsyncChannel {
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class ASocketChannel private constructor(override val nioChannel: SocketChannel) : AsyncChannel() {
+class ASocketChannel private constructor(
+    override val nioChannel: SocketChannel,
+    override val emitter: IOEventEmitter
+) : AsyncChannel() {
     companion object {
-        suspend fun open(addr: SocketAddress? = null) =
-            ASocketChannel(SocketChannel.open()).also {
-                DefaultIOEventEmitter.register(it.nioChannel)
-                if (addr != null)
-                    it.connect(addr)
-            }
-
-        suspend fun wrap(socketChannel: SocketChannel) =
-            ASocketChannel(socketChannel).also {
-                DefaultIOEventEmitter.register(socketChannel)
-            }
-
-        fun openBlocking(addr: SocketAddress? = null) = runBlocking {
-            open(addr)
+        suspend fun open(
+            addr: SocketAddress? = null,
+            emitter: IOEventEmitter = DefaultIOEventEmitter
+        ) = ASocketChannel(SocketChannel.open(), emitter).also {
+            emitter.register(it.nioChannel)
+            if (addr != null)
+                it.connect(addr)
         }
 
-        fun wrapBlocking(socketChannel: SocketChannel) = runBlocking {
-            wrap(socketChannel)
+        suspend fun wrap(
+            socketChannel: SocketChannel,
+            emitter: IOEventEmitter = DefaultIOEventEmitter
+        ) = ASocketChannel(socketChannel, emitter).also {
+            emitter.register(socketChannel)
+        }
+
+        fun openBlocking(
+            addr: SocketAddress? = null,
+            emitter: IOEventEmitter = DefaultIOEventEmitter
+        ) = runBlocking {
+            open(addr, emitter)
+        }
+
+        fun wrapBlocking(
+            socketChannel: SocketChannel,
+            emitter: IOEventEmitter = DefaultIOEventEmitter
+        ) = runBlocking {
+            wrap(socketChannel, emitter)
         }
     }
 
@@ -132,7 +146,7 @@ class ASocketChannel private constructor(override val nioChannel: SocketChannel)
 
     private suspend fun wait(event: InterestOp) {
         try {
-            DefaultIOEventEmitter.waitEvent(nioChannel, event)
+            emitter.waitEvent(nioChannel, event)
         } catch (ex: UnregisterException) {
             throw ClosedChannelException()
         }
@@ -140,11 +154,15 @@ class ASocketChannel private constructor(override val nioChannel: SocketChannel)
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class AServerSocketChannel private constructor(override val nioChannel: ServerSocketChannel) : AsyncChannel() {
+class AServerSocketChannel private constructor(
+    override val nioChannel: ServerSocketChannel,
+    override val emitter: IOEventEmitter
+) : AsyncChannel() {
     companion object {
-        suspend fun open() = AServerSocketChannel(ServerSocketChannel.open()).also {
-            DefaultIOEventEmitter.register(it.nioChannel)
-        }
+        suspend fun open(emitter: IOEventEmitter = DefaultIOEventEmitter) =
+            AServerSocketChannel(ServerSocketChannel.open(), emitter).also {
+                emitter.register(it.nioChannel)
+            }
     }
 
     init {
@@ -153,30 +171,40 @@ class AServerSocketChannel private constructor(override val nioChannel: ServerSo
 
     val localAddress = nioChannel.localAddress
 
-    fun bind(addr: SocketAddress) {
-        nioChannel.bind(addr)
+    fun bind(addr: SocketAddress, backlog: Int = -1) {
+        if (backlog != -1) {
+            nioChannel.bind(addr, backlog)
+        } else {
+            nioChannel.bind(addr)
+        }
     }
 
     suspend fun accept(): ASocketChannel {
-        DefaultIOEventEmitter.waitEvent(
+        emitter.waitEvent(
             nioChannel,
             InterestOp.Accept
         )
-        return ASocketChannel.wrap(nioChannel.accept())
+        return ASocketChannel.wrap(nioChannel.accept(), emitter)
     }
 }
 
 @Suppress("BlockingMethodInNonBlockingContext")
-class ADatagramChannel private constructor(override val nioChannel: DatagramChannel) : AsyncChannel() {
+class ADatagramChannel private constructor(
+    override val nioChannel: DatagramChannel,
+    override val emitter: IOEventEmitter
+) : AsyncChannel() {
     companion object {
-        suspend fun open() = ADatagramChannel(DatagramChannel.open()).also {
-            DefaultIOEventEmitter.register(it.nioChannel)
-        }
-
-        suspend fun wrap(datagramChannel: DatagramChannel) =
-            ADatagramChannel(datagramChannel).also {
-                DefaultIOEventEmitter.register(it.nioChannel)
+        suspend fun open(emitter: IOEventEmitter = DefaultIOEventEmitter) =
+            ADatagramChannel(DatagramChannel.open(), emitter).also {
+                emitter.register(it.nioChannel)
             }
+
+        suspend fun wrap(
+            datagramChannel: DatagramChannel,
+            emitter: IOEventEmitter = DefaultIOEventEmitter
+        ) = ADatagramChannel(datagramChannel, emitter).also {
+            emitter.register(it.nioChannel)
+        }
     }
 
     init {
@@ -194,7 +222,7 @@ class ADatagramChannel private constructor(override val nioChannel: DatagramChan
         if (buffer.remaining() <= 0)
             return null
         readLock.withLock {
-            DefaultIOEventEmitter.waitEvent(nioChannel, InterestOp.Read)
+            emitter.waitEvent(nioChannel, InterestOp.Read)
             return nioChannel.receive(buffer)
         }
     }
@@ -203,7 +231,7 @@ class ADatagramChannel private constructor(override val nioChannel: DatagramChan
         if (buffer.remaining() <= 0)
             return
         writeLock.withLock {
-            DefaultIOEventEmitter.waitEvent(nioChannel, InterestOp.Write)
+            emitter.waitEvent(nioChannel, InterestOp.Write)
             nioChannel.send(buffer, target)
         }
     }
