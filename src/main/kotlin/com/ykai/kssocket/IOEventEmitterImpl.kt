@@ -3,6 +3,7 @@ package com.ykai.kssocket
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeout
 import java.nio.ByteBuffer
 import java.nio.channels.Pipe
 import java.nio.channels.SelectableChannel
@@ -104,6 +105,19 @@ class IOEventEmitterImpl : IOEventEmitter {
         } ?: throw NotRegisterException()
     }
 
+    /**
+     * 超时之后并没有主动处理[InterestOp]和[TypedContinuationQueues]，
+     * [TypedContinuationQueues.consume]方法会忽略已经取消的续体。
+     *
+     * 如果该事件在超时异常已经抛出后触发，会导致[selector]的意外唤醒，但这是无法避免的，因为即使在这里处理了
+     * [InterestOp]，也需要调用[Selector.wakeup]才能使其生效。
+     */
+    override suspend fun waitEvent(chan: SelectableChannel, event: InterestOp, timeMillis: Long) {
+        withTimeout(timeMillis) {
+            waitEvent(chan, event)
+        }
+    }
+
     override fun close() {
         TODO()
     }
@@ -194,7 +208,7 @@ class IOEventEmitterImpl : IOEventEmitter {
         class ModifyMessage(val type: ModifyType, val chan: SelectableChannel, val cont: CancellableContinuation<Unit>)
 
         private val pipe = Pipe.open()
-        private val msgQueue = mutableListOf<ModifyMessage>()
+        private val msgQueue = ConcurrentLinkedQueue<ModifyMessage>()
         internal val pipeSourceKey: SelectionKey
 
         init {
@@ -227,7 +241,7 @@ class IOEventEmitterImpl : IOEventEmitter {
                     if (n == 0)
                         break
                     for (i in 1..n) {
-                        action(msgQueue.removeAt(0))
+                        action(msgQueue.poll())
                     }
                 }
             }

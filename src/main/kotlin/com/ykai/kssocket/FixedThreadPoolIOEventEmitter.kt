@@ -28,6 +28,10 @@ class FixedThreadPoolIOEventEmitter(private val poolSize: Int) : IOEventEmitter 
         findEmitter(chan).waitEvent(chan, event)
     }
 
+    override suspend fun waitEvent(chan: SelectableChannel, event: InterestOp, timeMillis: Long) {
+        findEmitter(chan).waitEvent(chan, event, timeMillis)
+    }
+
     override fun close() {
         emitters.forEach { it.close() }
         threads.forEach { it!!.join() }
