@@ -6,7 +6,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
-import java.time.LocalTime
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import kotlin.math.max
@@ -34,10 +33,10 @@ fun echoBenchmark(
         it.runInNewThread()
     }
 
-    println("[Server] starting...")
+    logServer("starting...")
     val server = AServerSocketChannel.open(emitter = emitter).also {
         it.bind(InetSocketAddress(serverPort), connectionCount)
-        println("[Server] started")
+        logServer("started")
     }
     val serverJob = runEchoServer(serverThreadPool, server, echoMessageSize)
     runEchoClients(clientThreadPool, emitter, serverPort, connectionCount, echoTimes, echoMessageSize)
@@ -46,7 +45,7 @@ fun echoBenchmark(
     try {
         serverJob.cancelAndJoin()
     } finally {
-        println("[Server] exiting...")
+        logServer("exiting...")
         server.close()
     }
     serverThreadPool.close()
@@ -60,16 +59,16 @@ fun CoroutineScope.runEchoServer(
 ) = launch(dispatcher) {
     while (true) {
         val client = chan.accept()
-        println("[Server] accepted new client: $client")
+        logServer("accepted new client: $client")
         launch(dispatcher + CoroutineExceptionHandler { _, ex ->
-            println("[Server] client closed with exception: $ex")
+            logServer("client closed with exception: $ex")
         }) clientJob@{
             val buf = ByteBuffer.allocate(echoMessageSize)
             while (true) {
                 buf.clear()
                 val readSize = client.read(buf)
                 if (readSize == -1) {
-                    println("[Server] client $client closed: $client")
+                    logServer("client $client closed: $client")
                     return@clientJob
                 }
                 buf.flip()
@@ -93,35 +92,41 @@ fun CoroutineScope.runEchoClients(
     var minDuration = Double.MAX_VALUE
     val clientJobs = ConcurrentLinkedQueue<Job>()
     for (j in 0 until clientCount) {
-        launch(threadPool) client@ {
+        launch(threadPool) client@{
             val client = ASocketChannel.open(InetSocketAddress(serverPort), emitter)
-            println("[Client] connected")
-            val startTime = LocalTime.now()
+            logClient("connected")
             val buf = ByteBuffer.wrap(ByteArray(echoMessageSize) { it.toByte() })
+            val start = System.currentTimeMillis()
             for (i in 0 until echoTimes) {
                 buf.clear()
                 try {
                     client.writeAll(buf)
                 } catch (e: Exception) {
-                    println("[Client] write error: $e")
+                    logClient("write error: $e").let { }
                     return@client
                 }
                 buf.clear()
                 client.read(buf)
             }
-            val endTime = LocalTime.now()
-            val duration = endTime.getDoubleSecond() - startTime.getDoubleSecond()
+            val end = System.currentTimeMillis()
+            val duration = (end - start) / 1000.0
             durationLock.withLock {
                 maxDuration = max(duration, maxDuration)
                 minDuration = min(duration, minDuration)
             }
-            println("[Client] $client send over in $duration(ms)")
+            logClient("$client send over in $duration(ms)")
         }.let {
             clientJobs.offer(it)
         }
     }
     clientJobs.forEach { it.join() }
-    println("[Client] Jobs all over. Max duration: $maxDuration, min duration: $minDuration")
+    logClient("Jobs all over. Max duration: $maxDuration, min duration: $minDuration")
 }
 
-fun LocalTime.getDoubleSecond() = this.minute * 60 + this.second + (this.nano / 1000_000_000.0)
+fun logServer(log: String) {
+    println("[Server] $log")
+}
+
+fun logClient(log: String) {
+    println("[Client] $log")
+}
