@@ -49,6 +49,7 @@ class IOEventEmitterImpl : IOEventEmitter {
                 val key = iter.next()
                 if (!key.isValid) {
                     // 可能被另一个线程关闭
+                    iter.remove()
                     continue
                 }
                 if (key.isAcceptable) {
