@@ -41,5 +41,5 @@ fun main() = runBlocking {
 ## TODO
 
 - [x] Socks/Socks5支持
-- [ ] DNS异步查询
+- [x] DNS异步查询
 - [ ] IPv6支持
