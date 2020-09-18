@@ -1,7 +1,6 @@
 package com.ykai.kssocket.examples
 
-import com.ykai.kssocket.ASocketChannel
-import kotlinx.coroutines.Job
+import com.ykai.kssocket.channels.ASocketChannel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress

@@ -1,6 +1,6 @@
 package com.ykai.kssocket.examples
 
-import com.ykai.kssocket.ADatagramChannel
+import com.ykai.kssocket.channels.ADatagramChannel
 import kotlinx.coroutines.runBlocking
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer

@@ -1,6 +1,6 @@
-import com.ykai.kssocket.DefaultIOEventEmitter
-import com.ykai.kssocket.IOEventEmitter
-import com.ykai.kssocket.InterestOp
+import com.ykai.kssocket.emitter.DefaultIOEventEmitter
+import com.ykai.kssocket.emitter.IOEventEmitter
+import com.ykai.kssocket.emitter.InterestOp
 import kotlinx.coroutines.*
 import org.junit.AfterClass
 import org.junit.Assert
@@ -99,6 +99,13 @@ class IOEventEmitterImplTest {
         Assert.assertFalse(returned)
 
         Unit
+    }
+
+    @Test
+    fun waitEvent2() = runBlocking {
+        val sock = SocketChannel.open(InetSocketAddress(serverPort))
+        sock.configureBlocking(false)
+        emitter.register(sock)
     }
 
     @Test

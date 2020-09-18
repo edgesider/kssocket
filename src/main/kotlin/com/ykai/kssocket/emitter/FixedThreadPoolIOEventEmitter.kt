@@ -1,4 +1,4 @@
-package com.ykai.kssocket
+package com.ykai.kssocket.emitter
 
 import java.nio.channels.SelectableChannel
 import kotlin.concurrent.thread

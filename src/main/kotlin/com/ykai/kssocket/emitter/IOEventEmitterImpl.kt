@@ -1,4 +1,4 @@
-package com.ykai.kssocket
+package com.ykai.kssocket.emitter
 
 import kotlinx.coroutines.CancellableContinuation
 import kotlinx.coroutines.CancellationException
@@ -210,7 +210,7 @@ class IOEventEmitterImpl : IOEventEmitter {
 
         private val pipe = Pipe.open()
         private val msgQueue = ConcurrentLinkedQueue<ModifyMessage>()
-        internal val pipeSourceKey: SelectionKey
+        val pipeSourceKey: SelectionKey
 
         init {
             pipe.source().let {
@@ -259,3 +259,9 @@ private fun smartThrow(ex: CancellationException): Nothing =
         throw ex.cause as IOEventEmitterException
     else
         throw ex
+
+open class IOEventEmitterException : Exception()
+class UnregisterException : IOEventEmitterException()
+class NotRegisterException : IOEventEmitterException()
+class RegisteredException : IOEventEmitterException()
+class ClosedEmitterException : IOEventEmitterException()

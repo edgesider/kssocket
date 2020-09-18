@@ -1,4 +1,4 @@
-package com.ykai.kssocket
+package com.ykai.kssocket.emitter
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException

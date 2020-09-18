@@ -1,6 +1,10 @@
 package com.ykai.kssocket.benchmark
 
 import com.ykai.kssocket.*
+import com.ykai.kssocket.channels.AServerSocketChannel
+import com.ykai.kssocket.channels.ASocketChannel
+import com.ykai.kssocket.emitter.FixedThreadPoolIOEventEmitter
+import com.ykai.kssocket.emitter.IOEventEmitter
 import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -94,6 +98,7 @@ fun CoroutineScope.runEchoClients(
     for (j in 0 until clientCount) {
         launch(threadPool) client@{
             val client = ASocketChannel.open(InetSocketAddress(serverPort), emitter)
+//            val client = NioASocketChannel()
             logClient("connected")
             val buf = ByteBuffer.wrap(ByteArray(echoMessageSize) { it.toByte() })
             val start = System.currentTimeMillis()

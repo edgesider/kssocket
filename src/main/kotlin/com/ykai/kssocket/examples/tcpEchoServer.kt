@@ -1,6 +1,6 @@
 package com.ykai.kssocket.examples
 
-import com.ykai.kssocket.AServerSocketChannel
+import com.ykai.kssocket.channels.AServerSocketChannel
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking

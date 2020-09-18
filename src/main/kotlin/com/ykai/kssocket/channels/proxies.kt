@@ -1,4 +1,4 @@
-package com.ykai.kssocket
+package com.ykai.kssocket.channels
 
 import java.net.InetSocketAddress
 
@@ -31,3 +31,5 @@ class Socks5Proxy(
 }
 
 class Socks5ProxyException(msg: String) : Exception(msg)
+class UnsupportedProxyException : Exception()
+class ProxyServerException(msg: String, cause: Throwable? = null) : Exception(msg, cause)
