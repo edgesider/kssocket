@@ -69,7 +69,7 @@ fun ByteBuffer.clearAndLimit(limit: Int) {
     limit(limit)
 }
 
-suspend fun processProxyException(action: suspend () -> Any) {
+inline fun processProxyException(action: () -> Any) {
     try {
         action()
     } catch (e: ProxyServerException) {
