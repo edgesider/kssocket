@@ -5,21 +5,22 @@ import kotlinx.coroutines.runBlocking
 import java.net.Inet4Address
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
+import java.util.concurrent.atomic.AtomicInteger
 
 class DNSResolver(dnsHost: Inet4Address, port: Int = 53) {
-    private val serverChannel: ADatagramChannel = runBlocking {
+    val serverChannel: ADatagramChannel = runBlocking {
         ADatagramChannel.open()
     }
 
     val dnsAddress = InetSocketAddress(dnsHost, port)
-    private var sessionId = 1000
+    private var sessionId = AtomicInteger(100)
 
     suspend fun resolve(host: String): List<Inet4Address> {
         // TODO buffer pool
         val buffer = ByteBuffer.allocate(2048)
         val query = DNSPacket.QueryItem(host, 1, 1)
         val pkt = DNSPacket(
-            sessionId++, DNSPacket.DefaultRequestFlags,
+            sessionId.getAndIncrement(), DNSPacket.DefaultRequestFlags,
             arrayOf(query), emptyArray(), emptyArray(), emptyArray()
         )
         serverChannel.send(pkt.toByteBuffer(buffer).also { it.flip() }, dnsAddress)
