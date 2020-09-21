@@ -29,8 +29,9 @@ class IOEventEmitterImpl : IOEventEmitter {
                         ModifyPipe.ModifyType.Register -> {
                             msg.chan.register(selector, 0, TypedContinuationQueues())
                         }
+                        ModifyPipe.ModifyType.UnregisterNoWait,
                         ModifyPipe.ModifyType.Unregister -> {
-                            msg.chan.keyFor(selector).let { key ->
+                            msg.chan.keyFor(selector)?.let { key ->
                                 // key.cancel()之后waitEvent就无法加入新的续体了
                                 key.cancel()
                                 key.abortCont()
@@ -38,13 +39,14 @@ class IOEventEmitterImpl : IOEventEmitter {
                         }
                     }
                 } catch (ex: Exception) {
-                    msg.cont.cancel(ex)
+                    msg.cont?.cancel(ex)
                     return@recvAll
                 }
-                try {
-                    msg.cont.resume(Unit)
-                } catch (e: CancellationException) {
-                }
+                if (msg.cont != null)
+                    try {
+                        msg.cont.resume(Unit)
+                    } catch (e: CancellationException) {
+                    }
             }
             val iter = selector.selectedKeys().iterator()
             while (iter.hasNext()) {
@@ -82,6 +84,7 @@ class IOEventEmitterImpl : IOEventEmitter {
                 modifyPipe.sendRegister(chan, it)
             }
         } catch (ex: CancellationException) {
+            modifyPipe.sendUnregisterNoWait(chan)
             smartThrow(ex)
         }
     }
@@ -105,6 +108,7 @@ class IOEventEmitterImpl : IOEventEmitter {
                     key.addCont(it, event)
                 }
             } catch (ex: CancellationException) {
+                // TODO 是否需要取消op
                 smartThrow(ex)
             }
         } ?: throw NotRegisterException()
@@ -209,8 +213,8 @@ class IOEventEmitterImpl : IOEventEmitter {
     }
 
     private class ModifyPipe(val selector: Selector) {
-        enum class ModifyType { Register, Unregister }
-        class ModifyMessage(val type: ModifyType, val chan: SelectableChannel, val cont: CancellableContinuation<Unit>)
+        enum class ModifyType { Register, Unregister, UnregisterNoWait }
+        class ModifyMessage(val type: ModifyType, val chan: SelectableChannel, val cont: CancellableContinuation<Unit>?)
 
         private val pipe = Pipe.open()
         private val msgQueue = ConcurrentLinkedQueue<ModifyMessage>()
@@ -231,6 +235,10 @@ class IOEventEmitterImpl : IOEventEmitter {
             send(ModifyMessage(ModifyType.Unregister, chan, cont))
         }
 
+        fun sendUnregisterNoWait(chan: SelectableChannel) {
+            send(ModifyMessage(ModifyType.UnregisterNoWait, chan, null))
+        }
+
         fun send(message: ModifyMessage) {
             synchronized(msgQueue) {
                 msgQueue.add(message)
@@ -238,7 +246,7 @@ class IOEventEmitterImpl : IOEventEmitter {
             }
         }
 
-        fun recvAll(action: (message: ModifyMessage) -> Unit) {
+        inline fun recvAll(action: (message: ModifyMessage) -> Unit) {
             synchronized(msgQueue) {
                 val buf = ByteBuffer.allocate(100)
                 while (true) {
