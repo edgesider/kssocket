@@ -3,13 +3,16 @@ package com.ykai.kssocket.emitter
 import java.nio.channels.SelectableChannel
 import kotlin.concurrent.thread
 
-class FixedThreadPoolIOEventEmitter(private val poolSize: Int) : IOEventEmitter {
+class FixedThreadPoolIOEventEmitter(
+    private val poolSize: Int,
+    val name: String? = null
+) : IOEventEmitter {
     private val emitters = Array(poolSize) { IOEventEmitterImpl() }
     private val threads = Array<Thread?>(poolSize) { null }
 
     override fun run() {
         emitters.forEachIndexed { i, emitter ->
-            threads[i] = thread(start = true, isDaemon = true) {
+            threads[i] = thread(name = "$name-$i", start = true, isDaemon = true) {
                 emitter.run()
             }
         }
