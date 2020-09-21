@@ -18,9 +18,11 @@ class IOEventEmitterImpl : IOEventEmitter {
 
     override fun run() {
         while (true) {
-            if (selector.select() == 0)
-                continue
-            selector.selectedKeys().remove(modifyPipe.pipeSourceKey)
+            if (selector.selectNow() == 0) {  // 清理wakeup
+                if (selector.select() == 0 && Thread.interrupted()) {
+                    break
+                }
+            }
             modifyPipe.recvAll { msg ->
                 try {
                     when (msg.type) {
@@ -47,6 +49,8 @@ class IOEventEmitterImpl : IOEventEmitter {
             val iter = selector.selectedKeys().iterator()
             while (iter.hasNext()) {
                 val key = iter.next()
+                if (key == modifyPipe.pipeSourceKey)
+                    continue
                 if (!key.isValid) {
                     // 可能被另一个线程关闭
                     iter.remove()
