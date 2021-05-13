@@ -18,6 +18,7 @@ class IOEventEmitterImpl : IOEventEmitter {
 
     override fun run() {
         while (true) {
+            // TODO IOException
             if (selector.selectNow() == 0) {  // 清理wakeup
                 if (selector.select() == 0 && Thread.interrupted()) {
                     break
@@ -173,9 +174,11 @@ class IOEventEmitterImpl : IOEventEmitter {
         fun add(key: SelectionKey, cont: CancellableContinuation<Unit>, event: InterestOp) {
             // 保证addOp和queue.add同时操作
             synchronized(key) {
-                getByEvent(event).add(cont)
+                val q = getByEvent(event)
+                q.add(cont)
                 key.addOp(event)
-                selector.wakeup()
+                if (q.size == 1)
+                    selector.wakeup()
             }
         }
 
